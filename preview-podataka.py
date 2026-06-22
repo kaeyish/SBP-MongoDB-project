@@ -149,9 +149,9 @@ def backfill_dpd_progression(df):
 
             if df.loc[idx_30, "dpd_current"] == 0:
                 df.loc[idx_30, "dpd_current"] = 30
-                df.loc[idx_60, "payment_made"] = 0
-                df.loc[idx_60, "payment_amount"] = 0
-                        
+                df.loc[idx_30, "payment_made"] = 0
+                df.loc[idx_30, "payment_amount"] = 0
+
         later_ninety_idxs = ninety_rows.index[1:]
         df.loc[later_ninety_idxs, "dpd_current"] = 120
 
@@ -280,6 +280,7 @@ print (np.unique(df_credit_score['employment_status']))
 #%% Filling in collections
 
 from pymongo import MongoClient
+import pprint
 
 client = MongoClient("mongodb://localhost:27017/")
 db = client["banking_db"]
@@ -304,7 +305,7 @@ print(df_performance.columns)
 
 #%% OSNOVNI UPITI NAD NEOPTIMIZOVANOM SHEMOM
 #%% 1. Za svakog klijenta koji je ušao u default, odrediti mesec pre ulaska u 
-# default u kom je imao najveći pad kreditnog rejtinga u prethodna 3 meseca.
+# default u kom je imao najveći pad kreditnog rejtinga u odnosu na 3 meseca ranije.
 
 # ovaj upit izvrsava se iskljucivo nad performance kolekcijom
 
@@ -372,18 +373,10 @@ q1_v1_explain = db.command(
     verbosity = "executionStats"
 )
 
-print(q1_v1_explain)
+pprint.pprint(q1_v1_explain)
 
 #%% 2. Pronaći klijente kod kojih je iskorišćenost kreditne kartice porasla više od 40%,
 #  a kreditna sposobnost opala za više od 100 poena u prethodna 3 meseca pre likvidacije.
-
-# za potrebe ovog upita, i dalje je dovoljan samo monthly performance
-
-# sta znaci window frame ovog upita:
-# self explanatory - pronalazimo mesec likvidacije
-# proveravamo razliku navedenih polja za [n-2]-[n-1] i [n-1]-[n]
-# imamo and uslov da su ispunjena oba kriterijuma
-# prvi put kada se ispune oba, uzimamo tog korisnika i nastavljamo dalje 
 
 # potencijalne optimizacije:
 # 1. sortiranje po has_defaulted, 0 unapred
@@ -400,30 +393,78 @@ print(q1_v1_explain)
 
 pipeline_q2 = [
     {
-        "$match" : {"has_defaulted" : 1,
-                    "dpd_current" : "$gt 0"}
+        "$match" : {
+                "dpd_current" : {"$nin" : [0, 120]}
+                }
     },
     {
-        "$group" : {
-
-        }
-    }
-    {
         "$setWindowFields" : {
-            "partitionBy" : "$customer_id",
-            "sortBy" : {"observation_month" : 1},
-            "output" : {
-                "default_month":{
-                    "$first" :"$observation_month"
+            "partitionBy": {"customer_id" : 1},
+            "sortBy": {"months_on_book": 1},
+            "output": {
+                "prevCredit": {
+                    "$shift": {
+                        "output" : "$credit_score",
+                        "by" : -1
+                    }
+                },
+            "prevUtil": {
+                        "$shift": {
+                            "output" : "$revolving_utilization",
+                            "by" : -1
+                        }
                     }
                 }
             }
-    }
-    ,
+    },
     {
-        "$project":
-        {"customer_id" : 1
-         }
+        "$addFields" : {
+              "creditDrops": {
+                "$subtract": ["$credit_score", "$prevCredit"] 
+        },
+        "utilDrops" :{
+            "$subtract": ["$revolving_utilization","$prevUtil"]
+        }
+        }
+    },
+
+    {
+        "$addFields" : {
+            "finalizedDrops": {
+                "$cond": {
+                    "if": {
+                    "$and": [
+                        { "$gt": [ "$creditDrops", 100 ] },
+                        { "$gt": [ "$utilDrops", 0.4 ] }
+                    ]
+                    },
+                    "then": "true",
+                    "else": "false" 
+                }
+            }
+        }
+    },
+    {
+        "$match" : {
+             "finalizedDrops" : "true"
+        }
     }
     ]
-# %%
+
+results = collection_performance.aggregate(pipeline_q2)
+
+for res in results:
+    print (res)
+#%% Running optimizer over query 2 version 1
+
+q2_v1_explain = db.command(
+    "explain",
+    {
+        "aggregate" : "monthly_performance",
+        "pipeline" : pipeline_q2, 
+        "cursor" : {}
+    },
+    verbosity = "executionStats"
+)
+
+pprint.pprint(q2_v1_explain)
