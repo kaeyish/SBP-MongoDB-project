@@ -468,3 +468,134 @@ q2_v1_explain = db.command(
 )
 
 pprint.pprint(q2_v1_explain)
+
+#%% 3. Za korisnike sa lošim kreditnim rejtingom u trenutku odobrenja kredita (<579) odrediti 
+# odnos ukupne sume izvršenih uplata i predviđene vrednosti uplata u prvih 12 meseci, kao i stopu defaulta.
+
+# sum(payment_amount[:12]) / sum(scheduled_emi[:12])
+
+# count(izvuceni.loc['has_defaulted' == True]) / count(izvuceni[:])
+
+# ovo se radi nad origin skupom 
+pipeline_q3 = [ 
+    {
+        '$match': {
+            'credit_score_origination': {
+                '$lte': 579
+            }
+        }
+    }, {
+        '$setWindowFields': {
+            'partitionBy': {}, 
+            'sortBy': {}, 
+            'output': {
+                'totalCount': {
+                    '$count': {}, 
+                    'window': {
+                        'documents': [
+                            'unbounded', 'unbounded'
+                        ]
+                    }
+                }, 
+                'defaultCount': {
+                    '$sum': {
+                        '$cond': {
+                            'if': {
+                                '$eq': [
+                                    '$default_12m', 1
+                                ]
+                            }, 
+                            'then': 1, 
+                            'else': 0
+                        }
+                    }, 
+                    'window': {
+                        'documents': [
+                            'unbounded', 'unbounded'
+                        ]
+                    }
+                }
+            }
+        }
+    }, {
+        '$addFields': {
+            'defaultRatio': {
+                '$divide': [
+                    '$defaultCount', '$totalCount'
+                ]
+            }
+        }
+    }, {
+        '$lookup': {
+            'from': 'monthly_performance', 
+            'localField': 'customer_id', 
+            'foreignField': 'customer_id', 
+            'as': 'monthly_data'
+        }
+    }, {
+        '$set': {
+            'sumPaid': {
+                '$sum': {
+                    '$map': {
+                        'input': {
+                            '$slice': [
+                                '$monthly_data', 12
+                            ]
+                        }, 
+                        'as': 'item', 
+                        'in': '$$item.payment_amount'
+                    }
+                }
+            }, 
+            'sumExpected': {
+                '$sum': {
+                    '$map': {
+                        'input': {
+                            '$slice': [
+                                '$monthly_data', 12
+                            ]
+                        }, 
+                        'as': 'item', 
+                        'in': '$$item.scheduled_emi'
+                    }
+                }
+            }
+        }
+    }, {
+        '$addFields': {
+            'paymentRatio': {
+                '$cond': [
+                    {
+                        '$gt': [
+                            '$sumExpected', 0
+                        ]
+                    }, {
+                        '$divide': [
+                            '$sumPaid', '$sumExpected'
+                        ]
+                    }, 0
+                ]
+            }
+        }
+    }
+]
+
+
+results = collection_og.aggregate(pipeline_q3)
+
+for res in results:
+    print (res)
+
+#%% Running optimizer over query 3 version 1
+
+q3_v1_explain = db.command(
+    "explain",
+    {
+        "aggregate" : "origination_data",
+        "pipeline" : pipeline_q3, 
+        "cursor" : {}
+    },
+    verbosity = "executionStats"
+)
+
+pprint.pprint(q3_v1_explain)
