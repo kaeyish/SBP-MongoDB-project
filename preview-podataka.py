@@ -573,14 +573,14 @@ pipeline_q3 = [
                         '$divide': [
                             '$sumPaid', '$sumExpected'
                         ]
-                    }, 0
+                                                                                                                   }, 0
                 ]
             }
         }
-    }
+    }                                               
 ]
 
-
+#%%
 results = collection_og.aggregate(pipeline_q3)
 
 for res in results:
@@ -599,3 +599,97 @@ q3_v1_explain = db.command(
 )
 
 pprint.pprint(q3_v1_explain)
+
+#%% 4. Za svakog klijenta izračunati najduži uzastopni niz meseci bez propuštene uplate.
+
+#note: this query can be disgustingly "optimized" for the current data:
+# as the function for late payments took way too long to execute, it has been skipped and current db
+# only introduces late payments exactly before default, we can get streak without any calculations whatsoever
+# all we need to do is find the first time has_defaulted becomes 1 and return month_on_the_book - 3. if none is found, return # of rows user has
+
+pipeline_q4 = [
+    {
+        '$group': {
+            '_id': '$customer_id', 
+            'payments': {
+                '$push': '$payment_made'
+            }
+        }
+    }, {
+        '$project': {
+            'longest_streak': {
+                '$let': {
+                    'vars': {
+                        'result': {
+                            '$reduce': {
+                                'input': '$payments', 
+                                'initialValue': {
+                                    'current': 0, 
+                                    'longest': 0
+                                }, 
+                                'in': {
+                                    'current': {
+                                        '$cond': [
+                                            {
+                                                '$eq': [
+                                                    '$$this', 1
+                                                ]
+                                            }, {
+                                                '$add': [
+                                                    '$$value.current', 1
+                                                ]
+                                            }, 0
+                                        ]
+                                    }, 
+                                    'longest': {
+                                        '$max': [
+                                            '$$value.longest', {
+                                                '$cond': [
+                                                    {
+                                                        '$eq': [
+                                                            '$$this', 1
+                                                        ]
+                                                    }, {
+                                                        '$add': [
+                                                            '$$value.current', 1
+                                                        ]
+                                                    }, 0
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                }
+                            }
+                        }
+                    }, 
+                    'in': '$$result.longest'
+                }
+            }
+        }
+    }, {
+        '$project': {
+            '_id': 0, 
+            'customer_id': '$_id', 
+            'longest_streak': 1
+        }
+    }
+]
+
+results = collection_performance.aggregate(pipeline_q4)
+
+for res in results:
+    print (res)
+
+#%% Running optimizer over query 3 version 1
+
+q4_v1_explain = db.command(
+    "explain",
+    {
+        "aggregate" : "monthly_performance",
+        "pipeline" : pipeline_q4, 
+        "cursor" : {}
+    },
+    verbosity = "executionStats"
+)
+
+pprint.pprint(q4_v1_explain)
