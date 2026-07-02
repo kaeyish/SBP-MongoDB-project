@@ -693,3 +693,131 @@ q4_v1_explain = db.command(
 )
 
 pprint.pprint(q4_v1_explain)
+
+
+#%% 5.  Pronaći tri profila korisnika (starosnu grupu, rod, status zaposlenosti i opseg godišnjih prihoda) 
+# koji imaju najmanji prosečan DTI i najveći procenat korisnnika sa urednihm uplatama tokom prvih 12 meseci otplate.
+
+pipeline_q5 = [
+    {
+        '$addFields': {
+            'age_group': {
+                '$switch': {
+                    'branches': [
+                        {
+                            'case': {
+                                '$lt': [
+                                    '$age', 25
+                                ]
+                            }, 
+                            'then': '18-24'
+                        }, {
+                            'case': {
+                                '$lt': [
+                                    '$age', 35
+                                ]
+                            }, 
+                            'then': '25-34'
+                        }, {
+                            'case': {
+                                '$lt': [
+                                    '$age', 45
+                                ]
+                            }, 
+                            'then': '35-44'
+                        }, {
+                            'case': {
+                                '$lt': [
+                                    '$age', 55
+                                ]
+                            }, 
+                            'then': '45-54'
+                        }
+                    ], 
+                    'default': '55+'
+                }
+            }, 
+            'income_range': {
+                '$switch': {
+                    'branches': [
+                        {
+                            'case': {
+                                '$lt': [
+                                    '$annual_income', 30000
+                                ]
+                            }, 
+                            'then': '<30k'
+                        }, {
+                            'case': {
+                                '$lt': [
+                                    '$annual_income', 60000
+                                ]
+                            }, 
+                            'then': '30k-60k'
+                        }, {
+                            'case': {
+                                '$lt': [
+                                    '$annual_income', 100000
+                                ]
+                            }, 
+                            'then': '60k-100k'
+                        }
+                    ], 
+                    'default': '100k+'
+                }
+            }
+        }
+    }, {
+        '$group': {
+            '_id': {
+                'age_group': '$age_group', 
+                'gender': '$gender', 
+                'employment_status': '$employment_status', 
+                'income_range': '$income_range'
+            }, 
+            'avg_dti': {
+                '$avg': '$dti'
+            }, 
+            'regular_payment_percentage': {
+                '$avg': {
+                    '$cond': [
+                        {
+                            '$eq': [
+                                '$default_12m', 0
+                            ]
+                        }, 100, 0
+                    ]
+                }
+            }, 
+            'customers': {
+                '$sum': 1
+            }
+        }
+    }, {
+        '$sort': {
+            'avg_dti': 1, 
+            'regular_payment_percentage': -1
+        }
+    }, {
+        '$limit': 3
+    }
+]
+
+results = collection_og.aggregate(pipeline_q5)
+
+for res in results:
+    print (res)
+
+#%% Running optimizer over query 5 version 1
+
+q5_v1_explain = db.command(
+    "explain",
+    {
+        "aggregate" : "origination_data",
+        "pipeline" : pipeline_q5, 
+        "cursor" : {}
+    },
+    verbosity = "executionStats"
+)
+
+pprint.pprint(q5_v1_explain)
