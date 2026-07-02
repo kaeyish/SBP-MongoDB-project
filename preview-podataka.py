@@ -821,3 +821,67 @@ q5_v1_explain = db.command(
 )
 
 pprint.pprint(q5_v1_explain)
+
+
+#%% rearanziranje baze
+
+#Ipak zbog potreba spajanja za upite koji se odnose na karakteristike korisnika, 
+# deluje mi da bi imalo smisla upotrebiti princip proširene reference, pri čemu bi se obeležja 
+# korisnika neophodna za upite dodatno čuvala i uz mesečne aktivnosti. Referenca bi se proširila
+# da sadrži kreditni rejting u trenutku odobrenja kredita, rod, starosnu grupu i opseg prihoda korisnika
+# (koji bi se dodatno morali preurediti tako da predstavljaju grupe umesto pojedniačnih vrednosti). 
+# S obzirom da se ovaj drugi dokument odnosi na period od tri godine, za svakog korisnika bi onda, 
+# u najgorem slučaju, ovi podaci bili duplirani 36 puta. Dodatno, ove informacije se ne menjaju previše 
+# često (neke od njih čak i nikad, kao npr. ZATEČEN kreditni rejting u trenutku odobravanja kredita), 
+# tako da ne bi trebalo da bude previše dupliranih ažuriranja. 
+
+# Druga ideja jeste ubacivanje proračuna za informacije koje neki upiti traže tj. Precompound šablon. 
+# Primera radi, u prezentaciji sam pomenula da u originalnom datasetu postoje informacije o raznim 
+# promenama u poslednja 3 meseca zaključno sa svakom observacijom ali da te vrednosti nisu najbolje 
+# obračunate. Novi proračuni i čuvanje ovih vrednosti mogu uticati na upite 1 i 2, a mogu se proračunati 
+# i kumulativne vrednosti za upit 5, na primer. 
+
+
+# Lista ideja za indekse i rekonstruisanje:
+
+# - potencijalno smanjenje okvira podataka je i uklanjanje korisnika posle defaultovanja? ili sortiranje po has _defaulted i onda pretraga samo dok je 0 (ili do prvog =1)
+# 1. index nad customer_id - svakako je foreign key, mada selektivnost je ~17% tkd moze biti i da nije toliko idealan al kao za joinove (doduse nardeni koraci mogu ga prikazati kao suvisnog) 
+# 2. extended reference na podatke iz origination kolekcije, gender, income itd.
+# 3. dodavanje calculated polja za 3m razlike i slicne stvari!  
+
+# index zapravo moze ici nad credit score jer imamo upite koji to gledaju  
+
+#%% 1. korak - prosirena referenca
+
+
+
+
+#%% 2. korak - precomputed 
+
+
+#%% 3. korak indexi?
+
+
+
+
+#%% 4. korak, refill the db!
+
+from pymongo import MongoClient
+import pprint
+
+client = MongoClient("mongodb://localhost:27017/")
+db_v2 = client["banking_db_v2"]
+
+db.origination_data.insert_many(
+    df_credit_score.to_dict("records")
+)
+
+db.monthly_performance.insert_many(
+    df_performance.to_dict("records")
+)
+
+print ("Insert complete!")
+
+#%%
+collection_og_v2 = db_v2['origination_data']
+collection_performance_v2 = db_v2['monthly_performance']
