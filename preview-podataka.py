@@ -1062,4 +1062,145 @@ q2_v2_explain = db.command(
 pprint.pprint(q2_v2_explain)
 
 
-#%% q3v3 
+#%% q3v2 
+
+#%% q4v2
+
+pipeline_q4_v2 = [
+    {
+        '$group': {
+            '_id': '$customer_id', 
+            'maxConsistency': {
+                '$max': '$consecutive_on_time_months'
+            }
+        }
+    }
+]
+
+
+results = collection_performance_v2.aggregate(pipeline_q4_v2)
+
+for res in results:
+    print (res)
+
+
+#%% Running optimizer over query 4 ver 2
+
+q4_v2_explain = db.command(
+    "explain",
+    {
+        "aggregate" : "monthly_performance_v2",
+        "pipeline" : pipeline_q4_v2, 
+        "cursor" : {}
+    },
+    verbosity = "executionStats"
+)
+
+pprint.pprint(q4_v2_explain)
+
+#%% q5v2
+
+pipeline_q5_v2 = [
+    {
+        '$addFields': {
+            'age_group': {
+                '$switch': {
+                    'branches': [
+                        {
+                            'case': { '$lt': [ '$origination.age', 25 ] },
+                            'then': '18-24'
+                        },
+                        {
+                            'case': { '$lt': [ '$origination.age', 35 ] },
+                            'then': '25-34'
+                        },
+                        {
+                            'case': { '$lt': [ '$origination.age', 45 ] },
+                            'then': '35-44'
+                        },
+                        {
+                            'case': { '$lt': [ '$origination.age', 55 ] },
+                            'then': '45-54'
+                        }
+                    ],
+                    'default': '55+'
+                }
+            },
+
+            'income_range': {
+                '$switch': {
+                    'branches': [
+                        {
+                            'case': { '$lt': [ '$origination.annual_income', 30000 ] },
+                            'then': '<30k'
+                        },
+                        {
+                            'case': { '$lt': [ '$origination.annual_income', 60000 ] },
+                            'then': '30k-60k'
+                        },
+                        {
+                            'case': { '$lt': [ '$origination.annual_income', 100000 ] },
+                            'then': '60k-100k'
+                        }
+                    ],
+                    'default': '100k+'
+                }
+            }
+        }
+    },
+    {
+        '$group': {
+            '_id': {
+                'age_group': '$age_group',
+                'gender': '$origination.gender',
+                'employment_status': '$origination.employment_status',
+                'income_range': '$income_range'
+            },
+            'avg_dti': {
+                '$avg': '$origination.dti'
+            },
+            'regular_payment_percentage': {
+                '$avg': {
+                    '$cond': [
+                        { '$eq': [ '$origination.default_12m', 0 ] },
+                        100,
+                        0
+                    ]
+                }
+            },
+            'customers': {
+                '$sum': 1
+            }
+        }
+    },
+    {
+        '$sort': {
+            'avg_dti': 1,
+            'regular_payment_percentage': -1
+        }
+    },
+    {
+        '$limit': 3
+    }
+]
+
+
+results = collection_performance_v2.aggregate(pipeline_q5_v2)
+
+for res in results:
+    print (res)
+
+
+#%% Running optimizer over query 2 ver 2
+
+q5_v2_explain = db.command(
+    "explain",
+    {
+        "aggregate" : "monthly_performance_v2",
+        "pipeline" : pipeline_q5_v2, 
+        "cursor" : {}
+    },
+    verbosity = "executionStats"
+)
+
+pprint.pprint(q5_v2_explain)
