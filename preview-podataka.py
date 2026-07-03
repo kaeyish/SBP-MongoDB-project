@@ -1162,7 +1162,7 @@ pipeline_q5_v2 = [
             'regular_payment_percentage': {
                 '$avg': {
                     '$cond': [
-                        { '$eq': [ '$origination.default_12m', 0 ] },
+                        { '$eq': [ '$will_default_original', 0 ] },
                         100,
                         0
                     ]
