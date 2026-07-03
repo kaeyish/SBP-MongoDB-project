@@ -309,26 +309,25 @@ print(df_performance.columns)
 
 # ovaj upit izvrsava se iskljucivo nad performance kolekcijom
 
-try:
-    pipeline_q1 = [
-        {
-            "$match" : {"has_defaulted" : 1}
-        },
-        {
-            "$setWindowFields" : {
-                "partitionBy" : "$customer_id",
-                "sortBy" : {"observation_month" : 1},
-                "output" : {"3m_frame" : {
-                    "$shift" : {
-                        "output": "$credit_score",
-                        "by": -3
-                        }
+pipeline_q1 = [
+    {
+        "$match" : {"has_defaulted" : 1}
+    },
+    {
+        "$setWindowFields" : {
+            "partitionBy" : "$customer_id",
+            "sortBy" : {"observation_month" : 1},
+            "output" : {"3m_frame" : {
+                "$shift" : {
+                    "output": "$credit_score",
+                    "by": -3
                     }
                 }
             }
-        },
+        }
+    },
 
-        {
+    {
         "$addFields": {
             "drop_3m": {
                 "$cond": [
@@ -338,28 +337,26 @@ try:
                     ]
                 }
             }
-        },
-        {
+    },
+    {
         "$match": {
             "drop_3m": {"$ne": None}
             }
-        },
-        {
+    },
+    {
         "$group": {
             "_id": "$customer_id",
             "month_of_biggest_drop": {"$first": "$observation_month"},
             "biggest_drop": {"$first": "$drop_3m"}
             }
-        }
+    }
     ]
 
-    results = collection_performance.aggregate(pipeline_q1)
+results = collection_performance.aggregate(pipeline_q1)
 
-    for res in results:
-        print (res)
+for res in results:
+    print (res)
 
-except Exception as e:
-    raise Exception("An exception has occurred: ", e)
 
 #%% Running optimizer over query 1 version 1
 
@@ -381,75 +378,82 @@ pprint.pprint(q1_v1_explain)
 # potencijalne optimizacije:
 # 1. sortiranje po has_defaulted, 0 unapred
 # 2. sortiranje po mesecu observacije, asc
-# 3. 
 
-# MOZEMO IZVUCI MESECE NA DRUGACIJI NACIN.
-# IZVUCI SAMO MESECE U KOJIMA JE DPD > 0 JER JE RASPODELA PODATAKA SADA TAKVA DA 
-# JEDINI PUT KADA DPD ZAPRAVO NIJE NULA JESTE U TRENUTKU KADA POSTANE 30 PA 60 PA 90 PRE NEMINOVNOG
-# DEFAULTA!
-
-# odavde proizilazi nova moguca optimizacija:
-# preuredjivanje dpd-a tako da se trenutci posle defaulta prebace na 120 i tako ostanu (u tranutnom datasetu su na 90)
 
 pipeline_q2 = [
     {
-        "$match" : {
-                "dpd_current" : {"$nin" : [0, 120]}
-                }
-    },
-    {
-        "$setWindowFields" : {
-            "partitionBy": {"customer_id" : 1},
-            "sortBy": {"months_on_book": 1},
-            "output": {
-                "prevCredit": {
-                    "$shift": {
-                        "output" : "$credit_score",
-                        "by" : -1
+        '$match': {
+            'dpd_current': {
+                '$nin': [
+                    0, 120
+                ]
+            }
+        }
+    }, {
+        '$setWindowFields': {
+            'partitionBy': {
+                'customer_id': 1
+            }, 
+            'sortBy': {
+                'customer_id': 1, 
+                'observation_month': 1
+            }, 
+            'output': {
+                'prevCredit': {
+                    '$shift': {
+                        'output': '$credit_score', 
+                        'by': -3
                     }
-                },
-            "prevUtil": {
-                        "$shift": {
-                            "output" : "$revolving_utilization",
-                            "by" : -1
-                        }
+                }, 
+                'prevUtil': {
+                    '$shift': {
+                        'output': '$revolving_utilization', 
+                        'by': -3
                     }
                 }
             }
-    },
-    {
-        "$addFields" : {
-              "creditDrops": {
-                "$subtract": ["$credit_score", "$prevCredit"] 
-        },
-        "utilDrops" :{
-            "$subtract": ["$revolving_utilization","$prevUtil"]
         }
+    }, {
+        '$addFields': {
+            'creditDrops': {
+                '$subtract': [
+                    '$prevCredit', '$credit_score'
+                ]
+            }, 
+            'utilDrops': {
+                '$subtract': [
+                    '$prevUtil', '$revolving_utilization'
+                ]
+            }
         }
-    },
-
-    {
-        "$addFields" : {
-            "finalizedDrops": {
-                "$cond": {
-                    "if": {
-                    "$and": [
-                        { "$gt": [ "$creditDrops", 100 ] },
-                        { "$gt": [ "$utilDrops", 0.4 ] }
-                    ]
-                    },
-                    "then": "true",
-                    "else": "false" 
+    }, {
+        '$addFields': {
+            'finalizedDrops': {
+                '$cond': {
+                    'if': {
+                        '$and': [
+                            {
+                                '$gt': [
+                                    '$creditDrops', 100
+                                ]
+                            }, {
+                                '$gt': [
+                                    '$utilDrops', 0.4
+                                ]
+                            }
+                        ]
+                    }, 
+                    'then': 'true', 
+                    'else': 'false'
                 }
             }
         }
-    },
-    {
-        "$match" : {
-             "finalizedDrops" : "true"
+    }, {
+        '$match': {
+            'finalizedDrops': 'true'
         }
     }
-    ]
+]
 
 results = collection_performance.aggregate(pipeline_q2)
 
@@ -680,7 +684,7 @@ results = collection_performance.aggregate(pipeline_q4)
 for res in results:
     print (res)
 
-#%% Running optimizer over query 3 version 1
+#%% Running optimizer over query 4 version 1
 
 q4_v1_explain = db.command(
     "explain",
@@ -823,65 +827,239 @@ q5_v1_explain = db.command(
 pprint.pprint(q5_v1_explain)
 
 
-#%% rearanziranje baze
-
-#Ipak zbog potreba spajanja za upite koji se odnose na karakteristike korisnika, 
-# deluje mi da bi imalo smisla upotrebiti princip proširene reference, pri čemu bi se obeležja 
-# korisnika neophodna za upite dodatno čuvala i uz mesečne aktivnosti. Referenca bi se proširila
-# da sadrži kreditni rejting u trenutku odobrenja kredita, rod, starosnu grupu i opseg prihoda korisnika
-# (koji bi se dodatno morali preurediti tako da predstavljaju grupe umesto pojedniačnih vrednosti). 
-# S obzirom da se ovaj drugi dokument odnosi na period od tri godine, za svakog korisnika bi onda, 
-# u najgorem slučaju, ovi podaci bili duplirani 36 puta. Dodatno, ove informacije se ne menjaju previše 
-# često (neke od njih čak i nikad, kao npr. ZATEČEN kreditni rejting u trenutku odobravanja kredita), 
-# tako da ne bi trebalo da bude previše dupliranih ažuriranja. 
-
-# Druga ideja jeste ubacivanje proračuna za informacije koje neki upiti traže tj. Precompound šablon. 
-# Primera radi, u prezentaciji sam pomenula da u originalnom datasetu postoje informacije o raznim 
-# promenama u poslednja 3 meseca zaključno sa svakom observacijom ali da te vrednosti nisu najbolje 
-# obračunate. Novi proračuni i čuvanje ovih vrednosti mogu uticati na upite 1 i 2, a mogu se proračunati 
-# i kumulativne vrednosti za upit 5, na primer. 
-
-
-# Lista ideja za indekse i rekonstruisanje:
-
-# - potencijalno smanjenje okvira podataka je i uklanjanje korisnika posle defaultovanja? ili sortiranje po has _defaulted i onda pretraga samo dok je 0 (ili do prvog =1)
-# 1. index nad customer_id - svakako je foreign key, mada selektivnost je ~17% tkd moze biti i da nije toliko idealan al kao za joinove (doduse nardeni koraci mogu ga prikazati kao suvisnog) 
-# 2. extended reference na podatke iz origination kolekcije, gender, income itd.
-# 3. dodavanje calculated polja za 3m razlike i slicne stvari!  
-
-# index zapravo moze ici nad credit score jer imamo upite koji to gledaju  
+#%% rearanziranje baze - v2
 
 #%% 1. korak - prosirena referenca
 
+# prosirena referenca je basically niz vrednosti iz origination_data koji ce biti prebacen u performance dataframe
+# e sad, problem malo nastaje jer se performance dataframe jako jako dugo pretrazuje jer ipak ima 2 miliona redova
 
+#  Referenca bi se proširila
+# da sadrži kreditni rejting u trenutku odobrenja kredita, rod, starosnu grupu i opseg prihoda korisnika
+# (koji bi se dodatno morali preurediti tako da predstavljaju grupe umesto pojedniačnih vrednosti). 
 
+def apply_extended_reference(df_credit_score, df_performance):
+    origination_cols = [
+    "age",
+    "gender",
+    "employment_status",
+    "annual_income",
+    "dti",
+    "credit_score_origination"
+    ]
 
+    df_orig = df_credit_score.copy()
+
+    df_orig["origination"] = df_orig[origination_cols].to_dict("records")
+
+    df_orig = df_orig[["customer_id", "origination"]]
+
+    df_result = df_performance.merge(
+        df_orig,
+        on="customer_id",
+        how="left",
+        validate="many_to_one"
+    )
+
+    return df_result
+
+#%% pozivanje funkcije
+
+df_extended_ref = apply_extended_reference(df_credit_score, df_performance)
+
+print (df_extended_ref.sample())
 #%% 2. korak - precomputed 
 
+def add_precomputed_fields(df):
 
-#%% 3. korak indexi?
+    df["cumulative_payment_amount"] = (
+        df.groupby("customer_id")["payment_amount"]
+          .cumsum()
+    )
+
+    df["cumulative_scheduled_emi"] = (
+        df.groupby("customer_id")["scheduled_emi"]
+          .cumsum()
+    )
+
+    def consecutive_on_time(group):
+        streak = 0
+        result = []
+
+        for dpd in group["dpd_current"]:
+            if dpd == 0:
+                streak += 1
+            else:
+                streak = 0
+
+            result.append(streak)
+
+        return pd.Series(result, index=group.index)
+
+    df["consecutive_on_time_months"] = (
+        df.groupby("customer_id", group_keys=False)
+          .apply(consecutive_on_time)
+    )
+
+    df["credit_score_delta_3m"] = (
+        df.groupby("customer_id")["credit_score"].shift(3) - df["credit_score"]
+    )
+
+    df["revolving_utilization_delta_3m"] = (
+        df.groupby("customer_id")["revolving_utilization"].shift(3) -    df["revolving_utilization"]
+        )
+
+    return df
+
+#%% pozivanje precomputed 
+
+df_extended_ref = add_precomputed_fields(df_extended_ref)
+
+print (df_extended_ref.columns)
 
 
+#%% 3. korak, refill the db!
 
-
-#%% 4. korak, refill the db!
-
-from pymongo import MongoClient
-import pprint
-
-client = MongoClient("mongodb://localhost:27017/")
-db_v2 = client["banking_db_v2"]
-
-db.origination_data.insert_many(
-    df_credit_score.to_dict("records")
-)
-
-db.monthly_performance.insert_many(
-    df_performance.to_dict("records")
+db.monthly_performance_v2.insert_many(
+    df_extended_ref.to_dict("records")
 )
 
 print ("Insert complete!")
 
-#%%
-collection_og_v2 = db_v2['origination_data']
-collection_performance_v2 = db_v2['monthly_performance']
+collection_performance_v2 = db['monthly_performance_v2']
+#%% 4. korak indexi
+
+# customer_id ista prica od ranije, neka bude u kombinaciji sa month_on_book za neke hronoloske stvari
+# { customer_id: 1, months_on_book: 1 }
+
+# za query 3 i sada vec discarded query 4, origination credit score moze da dosta ubrza matching 
+# { "origination.credit_score_origination": 1 }
+
+collection_performance_v2.create_index(
+    [("customer_id", 1), ("months_on_book", 1)],
+    name="customer_mob_idx"
+)
+
+collection_performance_v2.create_index(
+    [("origination.credit_score_origination", 1)],
+    name="origination_score_idx"
+)
+
+print("Indexes created!")
+
+
+
+#%% query 1 ver 2
+
+# 1. Za svakog klijenta koji je ušao u default, odrediti mesec pre ulaska u 
+# default u kom je imao najveći pad kreditnog rejtinga u odnosu na 3 meseca ranije.
+
+pipeline_q1_v2 = [
+    {
+        '$match': {
+            'has_defaulted': 1, 
+            'credit_score_delta_3m': {
+                '$ne': None
+            }
+        }
+    }, {
+        '$sort': {
+            'customer_id': 1, 
+            'credit_score_delta_3m': 1
+        }
+    }, {
+        '$group': {
+            '_id': '$customer_id', 
+            'month_of_biggest_drop': {
+                '$first': '$observation_month'
+            }, 
+            'biggest_drop': {
+                '$first': '$credit_score_delta_3m'
+            }
+        }
+    }
+]
+
+results = collection_performance_v2.aggregate(pipeline_q1_v2)
+
+for res in results:
+    print (res)
+
+
+#%% Running optimizer over query 1 ver 2
+
+q1_v2_explain = db.command(
+    "explain",
+    {
+        "aggregate" : "monthly_performance_v2",
+        "pipeline" : pipeline_q1_v2, 
+        "cursor" : {}
+    },
+    verbosity = "executionStats"
+)
+
+pprint.pprint(q1_v2_explain)
+
+#%% q2v2 
+
+pipeline_q2_v2 = [
+    {
+        '$match': {
+            'dpd_current': {
+                '$nin': [
+                    0, 120
+                ]
+            }
+        }
+    }, {
+        '$addFields': {
+            'finalizedDrops': {
+                '$cond': {
+                    'if': {
+                        '$and': [
+                            {
+                                '$gt': [
+                                    '$credit_score_delta_3m', 100
+                                ]
+                            }, {
+                                '$gt': [
+                                    '$revolving_utilization_delta_3m', 0.4
+                                ]
+                            }
+                        ]
+                    }, 
+                    'then': 'true', 
+                    'else': 'false'
+                }
+            }
+        }
+    }, {
+        '$match': {
+            'finalizedDrops': 'true'
+        }
+    }
+]
+
+
+results = collection_performance_v2.aggregate(pipeline_q2_v2)
+
+for res in results:
+    print (res)
+
+
+#%% Running optimizer over query 2 ver 2
+
+q2_v2_explain = db.command(
+    "explain",
+    {
+        "aggregate" : "monthly_performance_v2",
+        "pipeline" : pipeline_q2_v2, 
+        "cursor" : {}
+    },
+    verbosity = "executionStats"
+)
+
+pprint.pprint(q2_v2_explain)
+
+
+#%% q3v3 
